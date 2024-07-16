@@ -236,7 +236,6 @@ class AssistantWidget(ida_kernwin.PluginForm):
         from Binoculars.function.Handle import FuncHandle
         
         assistant_reply = response.strip().replace("```json\n", "").replace("```\n", "").strip()
-        print("assistant_reply:",assistant_reply)
         
         message_history.append({"role": "user", "content": query})
         message_history.append({"role": "assistant", "content": assistant_reply})            
