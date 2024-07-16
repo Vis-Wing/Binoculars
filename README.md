@@ -10,6 +10,9 @@ Binoculars is an IDA PRO plugin with an integrated AI interface.
 4. Open IDA pro, use the ALT+Q shortcut key to open Binoculars or find Binoculars in the Edit/Plugins path of IDA pro.
 5. Next you can use Binoculars.Type your query or request in the input field and click Send or press Enter.You can chat with it or perform specific functions.
 ![image](https://github.com/user-attachments/assets/766532dd-d972-4250-9a10-dcc70ef5e5ae)
+6. Of course, you can also use the right mouse button to find the Binoculars switch model.
+![切换模型](https://github.com/user-attachments/assets/19af3747-52d3-4cb3-9d45-8933e9b37026)
+
 
 ## What Binoculars Can Do
 You can chat with Binoculars to get information without having to frequently browse the browser.  
@@ -21,6 +24,8 @@ You can use Binoculars shortcuts to analyze function functionality or rename var
 You can use Binoculars built-in commands to perform some functions, and of course you can write more functions to Binoculars to make Binoculars more powerful.  
 ![内置命令_符号查找](https://github.com/user-attachments/assets/51dee0fb-8757-4dc3-ae19-b50a9ac21930)  
 ![内置命令_函数分析](https://github.com/user-attachments/assets/6778650c-dcf7-4f04-8dec-280f79d777ad)  
+
+
 
 
 
