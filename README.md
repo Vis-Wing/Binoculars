@@ -25,7 +25,7 @@ You can use Binoculars built-in commands to perform some functions, and of cours
 
 
 ## Acknowledgments
-Inheriting the ideas of IDA Assistant, Gepetto and AutoGPT, it is a child standing on the shoulders of giants.  
+Binoculars inherits the ideas of IDA Assistant, Gepetto and AutoGPT. It is a child standing on the shoulders of giants.  
 Inheriting the ideas of AutoGPT, Binoculars will create unlimited possibilities.  
 Thank you for your wisdom and hard work. 
 
