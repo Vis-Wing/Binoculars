@@ -1,0 +1,4 @@
+httpx
+openai
+PyQt5
+configparser
