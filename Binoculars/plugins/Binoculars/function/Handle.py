@@ -7,6 +7,7 @@ import idautils
 import idaapi
 import functools
 import ida_name
+import ida_lines
 
 class FuncHandle(): 
     def __init__(self, assistant_widget):
@@ -29,14 +30,40 @@ class FuncHandle():
         try:
             start_address = int(args["start_address"], 16)
             end_address = int(args["end_address"], 16)
-
+            if start_address and end_address and start_address != end_address:
+                disassembly = ""
+                while start_address < end_address:
+                    disassembly += f"{hex(start_address)}: {idc.GetDisasm(start_address)}\n"
+                    start_address = idc.next_head(start_address)
+                return disassembly
+            else:
+                start_address = idc.read_selection_start()
+                end_address = idc.read_selection_end()
+                disassembly = ""
+                for ea in idautils.Heads(start, end):
+                    text = ida_lines.tag_remove(idc.generate_disasm_line(ea, 0))
+                    disassembly += f"{hex(ea)}: {text}\n"
+                return disassembly
+        except Exception as e:
+            return f"Error: {str(e)}"
+    
+    # 获取选定范围内的反汇编指令
+    def handle_get_selected_disassembly(self, args):
+        try:
+            start = idc.read_selection_start()
+            end = idc.read_selection_end()
+            
+            if start == idc.BADADDR or end == idc.BADADDR:
+                return ("No selection or invalid selection.")
+            
             disassembly = ""
-            while start_address < end_address:
-                disassembly += f"{hex(start_address)}: {idc.GetDisasm(start_address)}\n"
-                start_address = idc.next_head(start_address)
+            for ea in idautils.Heads(start, end):
+                text = ida_lines.tag_remove(idc.generate_disasm_line(ea, 0))
+                disassembly += f"{hex(ea)}: {text}\n"
             return disassembly
         except Exception as e:
             return f"Error: {str(e)}"
+        
     
     # 获取特定函数的反汇编指令
     def handle_get_disassembly_function(self, args):
@@ -56,7 +83,7 @@ class FuncHandle():
         except Exception as e:
             return f"Error: {str(e)}"
     
-    # 反编译给定地址处的代码
+    # 反编译给定地址处的函数的代码
     def handle_decompile_address(self, args):
         try:
             address = int(args["address"], 16)
@@ -256,7 +283,7 @@ class FuncHandle():
             decompiler_output = ida_hexrays.decompile(idaapi.get_screen_ea())
             messages,systemprompt = {},""
             default_model.query_model_async(
-            "你能解释一下下面的 C 函数的作用并为它建议一个更好的名称吗？不需要改进后的版本等其他信息！\n{decompiler_output}".format(decompiler_output=str(decompiler_output)),messages,systemprompt,
+            "Can you explain the purpose of the following C function and suggest a better name for it? No need for an improved version or other information! Please respond in the language used by the user!\n{decompiler_output}".format(decompiler_output=str(decompiler_output)),messages,systemprompt,
             functools.partial(comment_callback, address=idaapi.get_screen_ea(), view=widget))
             return 1
         except Exception as e:
@@ -276,3 +303,5 @@ class FuncHandle():
             # return 1
         # except Exception as e:
             # return f"Error: {str(e)}"  
+            
+        

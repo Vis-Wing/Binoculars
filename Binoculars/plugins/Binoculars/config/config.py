@@ -21,7 +21,7 @@ def writeconfig(section, key, content):
     config_handle = configparser.ConfigParser()
     config_handle.read(config)
     config_handle.set(section,key,str(content))
-    with open(redearth_config, 'w') as configfile:
+    with open(config, 'w') as configfile:
         config_handle.write(configfile)
         
 def readpromat(prompt):

@@ -22,6 +22,9 @@
 		- Name: get_disassembly
 			- Description: Gets the disassembly from start address to end address.
 			- Args: "start_address": String, "end_address": String
+		- Name: get_selected_disassembly
+			- Description: Gets the selected disassembly.
+			- Args: None
 		- Name: decompile_address
 			- Description: Decompile the function at the specified address.
 			- Args: "address": String

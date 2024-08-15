@@ -14,6 +14,7 @@ from collections import namedtuple
 chat_history = []
 message_history = []
 query = ""
+global_default_model = None
 system_prompt_flag = True
 system_prompt = readpromat("prompt_base")
 command_prompt = readpromat("prompt_command")
@@ -51,24 +52,29 @@ class IDAAssistant(ida_idaapi.plugin_t):
         super(IDAAssistant, self).__init__()
 
     def init(self):
+        from Binoculars.config.config import default_model
         
-        self.generate_plugin_select_menu()
+        self.generate_plugin_select_menu(default_model)
         self.menu = ContextMenuHooks()
         self.menu.hook()
         
         return idaapi.PLUGIN_KEEP
     
-    def generate_plugin_select_menu(self):
+    def generate_plugin_select_menu(self, default_model):
+        global global_default_model
+    
+        global_default_model = default_model
+        
         MODEL_CONFIGS = create_model_config()
         for model_config in MODEL_CONFIGS:
             idaapi.unregister_action(f"Binoculars:select_{model_config.model_class}_{model_config.name}")  
             
         for model_config in MODEL_CONFIGS:
-            self.bind_model_switch_action(model_config)
+            self.bind_model_switch_action(model_config, default_model)
     
-    def bind_model_switch_action(self, model_config):
+    def bind_model_switch_action(self, model_config, default_model):
         from Binoculars.function.SwapModel import SwapModelHandler
-        from Binoculars.config.config import default_model
+     
         action_name = f"Binoculars:select_{model_config.model_class}_{model_config.name}"
         action = idaapi.action_desc_t(action_name,
                                       model_config.name,
@@ -91,10 +97,19 @@ class IDAAssistant(ida_idaapi.plugin_t):
     def add_assistant_message(self, message):
         chat_history.append(f"<b>Assistant:</b> {message}") 
 
-class AssistantWidget(ida_kernwin.PluginForm):
+class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
     def __init__(self):
-            ida_kernwin.PluginForm.__init__(self)
-            self.icon = ida_kernwin.load_custom_icon("Binoculars/images/logo.ico")
+        ida_kernwin.PluginForm.__init__(self)
+        QtCore.QObject.__init__(self)
+        self.icon = ida_kernwin.load_custom_icon("Binoculars/images/logo.ico")
+        self.stop_flag = False
+        self.message_history_flag = False
+        self.default_model = global_default_model
+    
+    
+    def change_default_model(self):
+        global global_default_model
+        self.default_model = global_default_model
 
     def OnCreate(self, form):
         from Binoculars.function.Handle import FuncHandle
@@ -129,17 +144,20 @@ class AssistantWidget(ida_kernwin.PluginForm):
 
 
         input_layout = QtWidgets.QHBoxLayout()
-        self.user_input = QtWidgets.QLineEdit()
+        self.user_input = QtWidgets.QTextEdit()
+        self.user_input.setFixedHeight(50)
         self.user_input.setStyleSheet("""
-            QLineEdit {
+            QTextEdit {
                 background-color: #F5F5F5;
                 border: 1px solid #ccc;
                 padding: 5px;
             }
         """)
+        
+        self.user_input.installEventFilter(self)
         input_layout.addWidget(self.user_input)
-        self.user_input.returnPressed.connect(self.OnSendClicked)
-
+        
+        # Send button
         send_button = QtWidgets.QPushButton("Send")
         send_button.setStyleSheet("""
             QPushButton {
@@ -159,6 +177,27 @@ class AssistantWidget(ida_kernwin.PluginForm):
         """)
         send_button.clicked.connect(self.OnSendClicked)
         input_layout.addWidget(send_button)
+        
+        # stop button
+        stop_button = QtWidgets.QPushButton("Stop")
+        stop_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336; /* 红色 */
+                border: 1px solid #ccc;
+                color: white;
+                padding: 8px 16px;
+                text-align: center;
+                font-size: 14px;
+                margin: 4px 2px;
+                opacity: 0.8;
+                transition: 0.3s;
+                border-radius: 5px;
+            }
+            QPushButton:hover {opacity: 1}
+            QPushButton:pressed { background-color: #d32f2f; }
+        """)
+        stop_button.clicked.connect(self.OnStopClicked)
+        input_layout.addWidget(stop_button)
 
         layout.addLayout(input_layout)
 
@@ -209,12 +248,31 @@ class AssistantWidget(ida_kernwin.PluginForm):
 
         layout.addLayout(shortcut_layout)
         self.parent.setLayout(layout)
+        
     
+    def eventFilter(self, source, event):
+        if event.type() == QtCore.QEvent.KeyPress and source is self.user_input:
+            if event.key() == QtCore.Qt.Key_Return and event.modifiers() == QtCore.Qt.ShiftModifier:
+                cursor = self.user_input.textCursor()
+                cursor.insertText("\n")
+                return True
+            elif event.key() == QtCore.Qt.Key_Return:
+                self.OnSendClicked()
+                return True
+        return super().eventFilter(source, event)
+        
+    def OnStopClicked(self):
+        self.stop_flag = True
+        self.chat_record.append(f"<b>System Message:</b> AI execution stopped.")
+        
     def OnSendClicked(self):
+        
+        self.change_default_model()
+    
         global message_history,query,system_prompt_flag
-        from Binoculars.config.config import default_model
+        self.stop_flag = False
 
-        user_message = self.user_input.text().strip()
+        user_message = self.user_input.toPlainText().strip()
         if user_message:
             self.chat_record.append(f"<b>User:</b> {user_message}")
             self.user_input.clear()
@@ -226,24 +284,23 @@ class AssistantWidget(ida_kernwin.PluginForm):
             
             query = f"{user_message}\nCurrent address: {hex(current_address)}"
             messages = message_history.copy() 
-
-            default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived)
+            self.default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived)
             
     
     def OnResponseReceived(self, response):
         global message_history, query
-        from Binoculars.config.config import default_model
         from Binoculars.function.Handle import FuncHandle
         
         assistant_reply = response.strip().replace("```json\n", "").replace("```\n", "").strip()
         
-        message_history.append({"role": "user", "content": query})
-        message_history.append({"role": "assistant", "content": assistant_reply})            
+        if self.message_history_flag:
+            message_history.append({"role": "user", "content": query})
+            message_history.append({"role": "assistant", "content": assistant_reply})    
+            
         chat_history.append(f"<b>User:</b> {query}")
     
         try:
             assistant_reply = self.ParseResponse(assistant_reply)
-            # print("assistant_reply:",assistant_reply)
 
             if assistant_reply is None:
                 self.chat_record.append(f"<b>System Message:</b> Failed to parse assistant response.")
@@ -266,7 +323,7 @@ class AssistantWidget(ida_kernwin.PluginForm):
                 if command_handler:          
                     command_results[command_name] = command_handler(command_args)
                 else:
-                    self.PrintOutput(f"Unknown command: {command_name}")
+                    # self.PrintOutput(f"Unknown command: {command_name}")
                     command_results[command_name] = None
 
             query = ""
@@ -274,44 +331,71 @@ class AssistantWidget(ida_kernwin.PluginForm):
                 if result is not None:
                     query += f"{command_name} result:\n{json.dumps(result)}\n\n"
                 else:
-                    query += f"{command_name} result: None\n\n"
+                    # query += f"{command_name} result: None\n\n"
+                    query += f"{command_name} result: An unknown command was used. This behavior is prohibited. Please use the command specified in the request.\n\n"
                     
             if len(query) > 0:
                 systemprompt = system_prompt if system_prompt_flag else ""
                 systemprompt += command_prompt
                 messages = message_history.copy() 
-                default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived)
+                self.default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived)
 
         except Exception as e:
-            systemprompt = system_prompt if system_prompt_flag else ""
-            systemprompt += command_prompt
             traceback_details = traceback.format_exc()
             print(traceback_details)
-            self.PrintOutput(f"Error parsing assistant response: {str(e)}")
-            messages = message_history.copy() 
-            default_model.query_model_async(f"Error parsing response. please retry:\n {str(e)}", messages, systemprompt, self.OnResponseReceived)
+            
+            if not self.stop_flag:
+                self.PrintOutput(f"Error parsing assistant response: {str(e)}")
+                systemprompt = system_prompt if system_prompt_flag else ""
+                systemprompt += command_prompt             
+                messages = message_history.copy() 
+                self.default_model.query_model_async(f"Error parsing response. please retry:\n {str(e)}", messages, systemprompt, self.OnResponseReceived)
+            else:
+                self.PrintOutput(f"Error parsing assistant response: {str(e)}")
             
     def sanitize_json(self, json_string):
+        json_string = self.extract_json(json_string)
         json_string = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', '', json_string)
         json_string = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_string)
         json_string = re.sub(r'"\s*\n\s*"', '""', json_string)
         json_string = re.sub(r'\s*\n\s*', '', json_string)
         
-        return json_string    
+        return json_string   
+
+    def extract_json(self, mixed_content):
+        json_str = ''
+        stack = []
+        slash = False
+
+        for i, char in enumerate(mixed_content):
+            if slash:
+                slash = False
+                continue
+
+            if char == '{':
+                stack.append(i)
+            elif char == '}':
+                if not stack:
+                    continue
+                start = stack.pop()
+                json_str = mixed_content[start:i + 1]
+            elif char == '\\':
+                slash = True
+
+        return json_str
             
     def ParseResponse(self, response):
+
         try:
             response = self.sanitize_json(response)
-            parsed_response = json.loads(response)
-            return parsed_response
+            if response:
+                parsed_response = json.loads(response)
+                return parsed_response
+            else:
+                raise Exception("The data you returned is not in the required JSON format. Please return the information in the required JSON format.")
         except json.JSONDecodeError as e:
-            traceback_details = traceback.format_exc()
-            print(traceback_details)
-            raise e
+            raise Exception(str(e) + "error occurred. suggestion: Return only the required data in JSON format. No additional explanations or information outside of the JSON format should be included.")
         except Exception as e:
-            print(str(e))
-            traceback_details = traceback.format_exc()
-            print(traceback_details)
             raise e
             
     def PrintOutput(self, output_str):

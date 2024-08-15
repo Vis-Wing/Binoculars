@@ -5,13 +5,13 @@ class LanguageModel(abc.ABC):
     def query_model_async(self, query, cb):
         pass
  
-def get_model(model_dict):
+def get_model(model_dict_str):
     from Binoculars.config.config import readconfig
     import ast
     import importlib
     
     model_map = ast.literal_eval(readconfig("MODEL","model_map"))
-    model_dict = ast.literal_eval(model_dict)
+    model_dict = ast.literal_eval(model_dict_str)
     model_class = list(model_dict.keys())[0]
     model_type = list(model_dict.values())[0]
 
