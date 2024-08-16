@@ -9,8 +9,9 @@ Binoculars is an IDA PRO plugin with an integrated AI interface.
 3. Fill in the API KEY and the default model to be used in the config.ini file, for example {"GPT360":"360gpt2-pro"}.
 4. Open IDA pro, use the ALT+Q shortcut key to open Binoculars or find Binoculars in the Edit/Plugins path of IDA pro.
 5. Next you can use Binoculars.Type your query or request in the input field and click Send or press Enter.You can chat with it or perform specific functions.
-![image](https://github.com/user-attachments/assets/766532dd-d972-4250-9a10-dcc70ef5e5ae)
-6. Of course, you can also use the right mouse button to find the Binoculars switch model.
+![image](https://github.com/user-attachments/assets/144d3aed-617b-4910-aec6-8d4aa0242eed)
+
+7. Of course, you can also use the right mouse button to find the Binoculars switch model.
 ![切换模型](https://github.com/user-attachments/assets/19af3747-52d3-4cb3-9d45-8933e9b37026)
 
 
