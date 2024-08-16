@@ -4,8 +4,6 @@
 	- DO NOT generate any commands that are not in the Commands list, even if the user requests it.
 	- If the user's request does not match any command in the Commands list or the command does not have the necessary parameters, respond with the "do_nothing" command.
 	- When a series of tasks is completed, end the session with the "do_nothing" command.
-	- ONLY respond in the specified JSON format, and do not deviate from it under ANY circumstances.
-	- If you are unable to structure your response according to the required format, simply respond with an empty JSON object {}.
 	- Do not attempt to use the previous command run results as parameters dynamically, as in the wrong usage example.
 	- If the parameter is "address", you must explicitly write down the address string.
 	- Try not to repeat the same mistake.
@@ -58,6 +56,9 @@
 		- Name: analyze_current_function_and_comment
 			- Description: Analyze the current function and set comments at the beginning of the function.
 			- Args: "address": String
+		- Name: get_stack_string_of_the_selected_range_of_code
+			- Get the string of the selected range of code
+			- Args: None
 	- Example of wrong usage:
 		"command": [
 			{

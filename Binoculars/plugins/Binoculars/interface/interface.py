@@ -21,11 +21,11 @@ command_prompt = readpromat("prompt_command")
 
 
 def create_model_config():
-    from Binoculars.config.config import readconfig
+    from Binoculars.config.config import get_model_list
     import ast
     MODEL_CONFIGS = []
     ModelConfig = namedtuple("ModelConfig", ["name", "model_class", "context_path"])
-    model_map = ast.literal_eval(readconfig("MODEL","model_map"))
+    model_map = get_model_list()
     for modelclass,modeltypes in model_map.items():
         for modeltype in modeltypes:
             MODEL_CONFIGS.append(ModelConfig(modeltype, modelclass ,f"{'SwapModel'}/{modelclass}/"))
@@ -99,12 +99,16 @@ class IDAAssistant(ida_idaapi.plugin_t):
 
 class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
     def __init__(self):
+        from Binoculars.config.config import get_current_language
         ida_kernwin.PluginForm.__init__(self)
         QtCore.QObject.__init__(self)
         self.icon = ida_kernwin.load_custom_icon("Binoculars/images/logo.ico")
         self.stop_flag = False
         self.message_history_flag = False
-        self.default_model = global_default_model
+        self.default_model = global_default_model      
+        self.current_language = get_current_language()
+        self.error_count = 0
+        self.error_retry = 3
     
     
     def change_default_model(self):
@@ -238,7 +242,7 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
             action_desc = idaapi.action_desc_t(
                 action_name,
                 text,
-                ExplainHandler() if text == "Analyze the current function" else RenameHandler(),
+                ExplainHandler(self.default_model) if text == "Analyze the current function" else RenameHandler(),
                 "",
                 f"", 
                 199
@@ -278,11 +282,10 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
             self.user_input.clear()
             current_address = idc.here()
             
-            systemprompt = system_prompt if system_prompt_flag else ""
-            systemprompt += command_prompt
+            systemprompt = (system_prompt if system_prompt_flag else "") + command_prompt
             # system_prompt_flag = False
             
-            query = f"{user_message}\nCurrent address: {hex(current_address)}"
+            query = f"{user_message}\n" + f"Current address: {hex(current_address)}\n" + f"Reply in {self.current_language}"
             messages = message_history.copy() 
             self.default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived)
             
@@ -319,42 +322,66 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
                 if command_name == "do_nothing":
                     continue
                 command_args = command['args']
+                command_args["default_model"] = self.default_model
                 command_handler = getattr(self.func_handle, f"handle_{command_name}", None)
-                if command_handler:          
-                    command_results[command_name] = command_handler(command_args)
+                if command_handler:
+                    command_handler_result = command_handler(command_args)
+                    if isinstance(command_handler_result, dict) and "result" in command_handler_result:
+                        self.PrintOutput(f"Module execution results: {command_handler_result['result']}")
+        
+                    command_results[command_name] = command_handler_result
                 else:
-                    # self.PrintOutput(f"Unknown command: {command_name}")
+                    self.PrintOutput(f"Unknown command: {command_name}")
                     command_results[command_name] = None
 
             query = ""
             for command_name, result in command_results.items():
                 if result is not None:
-                    query += f"{command_name} result:\n{json.dumps(result)}\n\n"
+                    query += f"{command_name} result:\n" + f"{json.dumps(result)}\n" + f"Reply in {self.current_language}\n"
                 else:
                     # query += f"{command_name} result: None\n\n"
-                    query += f"{command_name} result: An unknown command was used. This behavior is prohibited. Please use the command specified in the request.\n\n"
+                    query += f"{command_name} result: An unknown command was used. This behavior is prohibited. Please use the command specified in the request.\n" + f"Reply in {self.current_language}\n"
                     
             if len(query) > 0:
-                systemprompt = system_prompt if system_prompt_flag else ""
-                systemprompt += command_prompt
+                systemprompt = (system_prompt if system_prompt_flag else "") + command_prompt  
                 messages = message_history.copy() 
-                self.default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived)
+                self.default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived) 
+
+            self.error_count = 0
 
         except Exception as e:
             traceback_details = traceback.format_exc()
             print(traceback_details)
             
-            if not self.stop_flag:
+            self.error_count += 1
+            
+            if self.error_count < self.error_retry and not self.stop_flag:
                 self.PrintOutput(f"Error parsing assistant response: {str(e)}")
-                systemprompt = system_prompt if system_prompt_flag else ""
-                systemprompt += command_prompt             
+                systemprompt = (system_prompt if system_prompt_flag else "") + command_prompt            
                 messages = message_history.copy() 
-                self.default_model.query_model_async(f"Error parsing response. please retry:\n {str(e)}", messages, systemprompt, self.OnResponseReceived)
+                query = f"Error parsing response:{str(e)}\n" + "Please refer to the error message to modify your reply\n" + f"Reply in {self.current_language}\n"
+                self.default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived)
             else:
                 self.PrintOutput(f"Error parsing assistant response: {str(e)}")
-            
-    def sanitize_json(self, json_string):
-        json_string = self.extract_json(json_string)
+                
+    def ParseResponse(self, response):
+        print(response)
+        try:
+            response = self.sanitize_json(response)
+            if response:
+                
+                parsed_response = json.loads(response)
+                return parsed_response
+            else:
+                raise Exception("The data you returned is not in the required JSON format. Please return the information in the required JSON format.")
+        except json.JSONDecodeError as e:
+            raise Exception(str(e) + "error occurred. suggestion: Return only the required data in JSON format. No additional explanations or information outside of the JSON format should be included.")
+        except Exception as e:
+            raise e
+
+    
+    def sanitize_json(self, mixed_content):
+        json_string = self.extract_json(mixed_content)
         json_string = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', '', json_string)
         json_string = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_string)
         json_string = re.sub(r'"\s*\n\s*"', '""', json_string)
@@ -383,20 +410,6 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
                 slash = True
 
         return json_str
-            
-    def ParseResponse(self, response):
-
-        try:
-            response = self.sanitize_json(response)
-            if response:
-                parsed_response = json.loads(response)
-                return parsed_response
-            else:
-                raise Exception("The data you returned is not in the required JSON format. Please return the information in the required JSON format.")
-        except json.JSONDecodeError as e:
-            raise Exception(str(e) + "error occurred. suggestion: Return only the required data in JSON format. No additional explanations or information outside of the JSON format should be included.")
-        except Exception as e:
-            raise e
             
     def PrintOutput(self, output_str):
         self.chat_record.append(f"<b>System Message:</b> {output_str}")

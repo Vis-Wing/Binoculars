@@ -5,14 +5,19 @@ import ida_hexrays
 import idc
 import re
 import ida_kernwin
-from Binoculars.config.config import default_model
+from Binoculars.config.config import get_current_model
+from Binoculars.config.config import get_current_language
+
 
 class ExplainHandler(idaapi.action_handler_t):
 
-    def __init__(self):
+    def __init__(self, default_model):
         idaapi.action_handler_t.__init__(self)
 
     def activate(self, ctx):
+        default_model = get_current_model()
+        current_language = get_current_language()
+    
         widget = ida_kernwin.get_current_widget()
         if ida_kernwin.get_widget_type(widget) != idaapi.BWN_PSEUDOCODE:
             func_ea = idaapi.get_screen_ea()
@@ -28,15 +33,15 @@ class ExplainHandler(idaapi.action_handler_t):
         decompiler_output = ida_hexrays.decompile(idaapi.get_screen_ea())
 
         default_model.query_model_async(
-            "你能解释一下下面的 C 函数的功能并为它建议一个更好的名称吗？不需要改进后的版本等其他信息！\n{decompiler_output}".format(decompiler_output=str(decompiler_output)),messages,systemprompt,
-            functools.partial(comment_callback, address=idaapi.get_screen_ea(), view=view))
+            "Can you explain the purpose of the following C function and suggest a better name for it? No need for an improved version or other information! Please reply in {current_language}!\n{decompiler_output}".format(decompiler_output=str(decompiler_output),current_language=current_language),messages,systemprompt,
+            functools.partial(comment_callback, address=idaapi.get_screen_ea(), view=view, default_model=default_model))
         return 1
 
     def update(self, ctx):
         return idaapi.AST_ENABLE_ALWAYS
         
         
-def comment_callback(address, view, response):
+def comment_callback(address, view, response, default_model):
   
     response = "\n".join(textwrap.wrap(response, 80, replace_whitespace=False))
     comment = idc.get_func_cmt(address, 0)

@@ -8,6 +8,7 @@ import idaapi
 import functools
 import ida_name
 import ida_lines
+import re
 
 class FuncHandle(): 
     def __init__(self, assistant_widget):
@@ -15,7 +16,8 @@ class FuncHandle():
 
     def PrintOutput(self, output_str):
         self.assistant_widget.PrintOutput(output_str)
-
+        
+    
     # 计算IDC表达式
     def handle_eval_idc(self, args):
         try:
@@ -271,7 +273,10 @@ class FuncHandle():
             
     def handle_analyze_current_function_and_comment(self, args):
         from Binoculars.function.ExplainFunc import comment_callback 
-        from Binoculars.config.config import default_model       
+        from Binoculars.config.config import default_model
+        default_model = args.get("default_model", default_model)     
+        from Binoculars.config.config import get_current_language
+        current_language = get_current_language()
         
         try:
             widget = ida_kernwin.get_current_widget()  # 获取当前活动的 widget
@@ -283,7 +288,7 @@ class FuncHandle():
             decompiler_output = ida_hexrays.decompile(idaapi.get_screen_ea())
             messages,systemprompt = {},""
             default_model.query_model_async(
-            "Can you explain the purpose of the following C function and suggest a better name for it? No need for an improved version or other information! Please respond in the language used by the user!\n{decompiler_output}".format(decompiler_output=str(decompiler_output)),messages,systemprompt,
+            "Can you explain the purpose of the following C function and suggest a better name for it? No need for an improved version or other information! Please reply in {current_language}!\n{decompiler_output}".format(decompiler_output=str(decompiler_output),current_language = current_language),messages,systemprompt,
             functools.partial(comment_callback, address=idaapi.get_screen_ea(), view=widget))
             return 1
         except Exception as e:
@@ -302,6 +307,23 @@ class FuncHandle():
             # additional_model_options={"response_format": {"type": "json_object"}})
             # return 1
         # except Exception as e:
-            # return f"Error: {str(e)}"  
+            # return f"Error: {str(e)}" 
             
+    
+    # 获取选中范围的代码的栈字符串
+    def handle_get_stack_string_of_the_selected_range_of_code(self, args): 
+        try:
+            disassembly_str = self.handle_get_selected_disassembly(args={})
+            if not disassembly_str:
+                return "No selection or invalid selection.Do not continue execution."
+            hex_list = re.findall(r',\s*([0-9A-Fa-f]+h)', disassembly_str)
+            result_str = ''
+            for hex_str in hex_list:
+                little_endian_bytes = bytes.fromhex(hex_str.replace("h",""))
+                big_endian_bytes = little_endian_bytes[::-1]
+                filtered_hex_str = ''.join(chr(int_data) for int_data in big_endian_bytes if int_data != 0)
+                result_str += filtered_hex_str 
+            return {"result":result_str}
         
+        except Exception as e:
+            return f"Error: {str(e)}"

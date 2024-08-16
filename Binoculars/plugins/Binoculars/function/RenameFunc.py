@@ -26,7 +26,7 @@ class RenameHandler(idaapi.action_handler_t):
     
         messages,systemprompt = {},""
         decompiler_output = ida_hexrays.decompile(idaapi.get_screen_ea())
-        default_model.query_model_async("分析以下C函数:\n{decompiler_output}\n建议更好的变量名称，用 JSON 数组回复，其中键是原始名称，值是建议的名称。不要解释任何内容，只打印 JSON 字典。".format(decompiler_output=str(decompiler_output)),messages,systemprompt,
+        default_model.query_model_async("nalyze the following C function:\n{decompiler_output}\nSuggest better variable names, reply with a JSON array where the keys are the original names and the values ​​are the suggested names. Don't interpret anything, just print the JSON dictionary.".format(decompiler_output=str(decompiler_output)),messages,systemprompt,
             functools.partial(rename_callback, address=idaapi.get_screen_ea(), view=view),
             additional_model_options={"response_format": {"type": "json_object"}})
         return 1
