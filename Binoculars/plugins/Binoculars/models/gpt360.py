@@ -17,7 +17,7 @@ class GPT360(BaseModel):
             "messages": messages,
             **additional_model_options
         }
-        print(messages)
+        # print(messages)
         try:
             response = httpx.post(self.base_url, headers=self.headers, data=json.dumps(payload), timeout=120.0, proxies=self.proxy if self.proxy else None)
             response.raise_for_status()
