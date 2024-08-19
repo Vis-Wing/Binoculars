@@ -365,7 +365,7 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
                 self.PrintOutput(f"Error parsing assistant response: {str(e)}")
                 
     def ParseResponse(self, response):
-        print(response)
+        # print(response)
         try:
             response = self.sanitize_json(response)
             if response:
