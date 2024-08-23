@@ -33,8 +33,7 @@ class ExplainHandler(idaapi.action_handler_t):
         decompiler_output = ida_hexrays.decompile(idaapi.get_screen_ea())
 
         default_model.query_model_async(
-            "Can you explain the purpose of the following C function and suggest a better name for it? No need for an improved version or other information! Please reply in {current_language}!\n{decompiler_output}".format(decompiler_output=str(decompiler_output),current_language=current_language),messages,systemprompt,
-            functools.partial(comment_callback, address=idaapi.get_screen_ea(), view=view, default_model=default_model))
+            "Can you explain the purpose of the following C function and suggest a better name for it? No need for an improved version or other information! Please reply in {current_language}!\n{decompiler_output}".format(decompiler_output=str(decompiler_output),current_language=current_language),messages,systemprompt,functools.partial(comment_callback, address=idaapi.get_screen_ea(), view=view, default_model=default_model))
         return 1
 
     def update(self, ctx):

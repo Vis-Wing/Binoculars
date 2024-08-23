@@ -3,9 +3,9 @@ import functools
 import ida_hexrays
 import idc
 import re
-from Binoculars.config.config import default_model
 import json
 import ida_kernwin
+from Binoculars.config.config import get_current_model
 
 class RenameHandler(idaapi.action_handler_t):
 
@@ -13,6 +13,8 @@ class RenameHandler(idaapi.action_handler_t):
         idaapi.action_handler_t.__init__(self)
 
     def activate(self, ctx):
+        default_model = get_current_model()
+        
         widget = ida_kernwin.get_current_widget()
         if ida_kernwin.get_widget_type(widget) != idaapi.BWN_PSEUDOCODE:
             func_ea = idaapi.get_screen_ea()
@@ -26,15 +28,18 @@ class RenameHandler(idaapi.action_handler_t):
     
         messages,systemprompt = {},""
         decompiler_output = ida_hexrays.decompile(idaapi.get_screen_ea())
-        default_model.query_model_async("nalyze the following C function:\n{decompiler_output}\nSuggest better variable names, reply with a JSON array where the keys are the original names and the values ​​are the suggested names. Don't interpret anything, just print the JSON dictionary.".format(decompiler_output=str(decompiler_output)),messages,systemprompt,
-            functools.partial(rename_callback, address=idaapi.get_screen_ea(), view=view),
-            additional_model_options={"response_format": {"type": "json_object"}})
+        
+        default_model.query_model_async("Analyze the following C function and suggest better variable names:\n{decompiler_output}\nRespond with a JSON object where the keys are the original names and the values are the suggested names. Do not interpret or add any additional information, just print the JSON object.".format(decompiler_output=str(decompiler_output)),messages,systemprompt,functools.partial(rename_callback, address=idaapi.get_screen_ea(), view=view),additional_model_options={"response_format": {"type": "json_object"}})
         return 1
 
     def update(self, ctx):
         return idaapi.AST_ENABLE_ALWAYS
         
+        
+
+        
 def rename_callback(address, view, response, retries=0):
+    response = sanitize_json(response)
     names = json.loads(response)
     if type(names) == list:
         result = {}
@@ -66,3 +71,35 @@ def rename_callback(address, view, response, retries=0):
         view.refresh_view(True)
     print("{model} 查询完成! {replaced} 变量重命名.".format(model=str(default_model),
                                                                               replaced=len(replaced)))
+
+
+def sanitize_json(mixed_content):
+    json_string = extract_json(mixed_content)  
+    json_string = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', '', json_string)
+    json_string = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_string)
+    json_string = re.sub(r'"\s*\n\s*"', '""', json_string)
+    json_string = re.sub(r'\s*\n\s*', '', json_string)
+    
+    return json_string   
+
+def extract_json(mixed_content):
+    json_str = ''
+    stack = []
+    slash = False
+
+    for i, char in enumerate(mixed_content):
+        if slash:
+            slash = False
+            continue
+
+        if char == '{':
+            stack.append(i)
+        elif char == '}':
+            if not stack:
+                continue
+            start = stack.pop()
+            json_str = mixed_content[start:i + 1]
+        elif char == '\\':
+            slash = True
+
+    return json_str
