@@ -29,7 +29,7 @@ class RenameHandler(idaapi.action_handler_t):
         messages,systemprompt = {},""
         decompiler_output = ida_hexrays.decompile(idaapi.get_screen_ea())
         
-        default_model.query_model_async("Analyze the following C function and suggest better variable names:\n{decompiler_output}\nRespond with a JSON object where the keys are the original names and the values are the suggested names. Do not interpret or add any additional information, just print the JSON object.".format(decompiler_output=str(decompiler_output)),messages,systemprompt,functools.partial(rename_callback, address=idaapi.get_screen_ea(), view=view),additional_model_options={"response_format": {"type": "json_object"}})
+        default_model.query_model_async("Analyze the following C function and suggest better variable names:\n{decompiler_output}\nRespond with a JSON object where the keys are the original names and the values are the suggested names. Do not interpret or add any additional information, just print the JSON object.".format(decompiler_output=str(decompiler_output)),messages,systemprompt,functools.partial(rename_callback, address=idaapi.get_screen_ea(), view=view,default_model=default_model),additional_model_options={"response_format": {"type": "json_object"}})
         return 1
 
     def update(self, ctx):
@@ -38,7 +38,7 @@ class RenameHandler(idaapi.action_handler_t):
         
 
         
-def rename_callback(address, view, response, retries=0):
+def rename_callback(address, view, response, default_model, retries=0):
     response = sanitize_json(response)
     names = json.loads(response)
     if type(names) == list:
