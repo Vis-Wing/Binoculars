@@ -10,6 +10,12 @@ import ida_idaapi
 from PyQt5 import QtWidgets, QtCore, QtGui
 from Binoculars.config.config import readpromat
 from collections import namedtuple
+from Binoculars.function.Handle import FuncHandle
+import inspect
+import threading
+import functools
+import random
+import string
 
 chat_history = []
 message_history = []
@@ -18,6 +24,7 @@ global_default_model = None
 system_prompt_flag = True
 system_prompt = readpromat("prompt_base")
 command_prompt = readpromat("prompt_command")
+command_prompt += str(FuncHandle.get_ai_prompts("openai"))
 
 
 def create_model_config():
@@ -32,12 +39,21 @@ def create_model_config():
     return MODEL_CONFIGS
     
 class ContextMenuHooks(idaapi.UI_Hooks):
+    def __init__(self, owner):
+        super(ContextMenuHooks, self).__init__()
+        self.owner = owner
+
     def finish_populating_widget_popup(self, form, popup):
-        MODEL_CONFIGS = create_model_config()
         if idaapi.get_widget_type(form) == idaapi.BWN_PSEUDOCODE:
+            MODEL_CONFIGS = create_model_config()
             for model_config in MODEL_CONFIGS:
-                action_name = f"Binoculars:select_{model_config.model_class}_{model_config.name}"
-                idaapi.attach_action_to_popup(form, popup, action_name, "Binoculars/"+model_config.context_path) 
+                menu_path = "Binoculars/" + model_config.context_path
+                model_name = model_config.name
+
+                if model_name in self.owner.model_action_map:
+                    action_name = self.owner.model_action_map[model_name]["action_name"]
+                    idaapi.attach_action_to_popup(form, popup, action_name, menu_path)
+ 
 
 class IDAAssistant(ida_idaapi.plugin_t):
     global message_history,chat_history
@@ -47,43 +63,74 @@ class IDAAssistant(ida_idaapi.plugin_t):
     help = "Provides an AI assistant for reverse engineering tasks"
     wanted_name = "Binoculars"
     wanted_hotkey = "Alt-Q"
+    model_action_map = {}
 
     def __init__(self):
         super(IDAAssistant, self).__init__()
+        
 
     def init(self):
         from Binoculars.config.config import default_model
         
         self.generate_plugin_select_menu(default_model)
-        self.menu = ContextMenuHooks()
+        self.menu = ContextMenuHooks(self)
         self.menu.hook()
         
         return idaapi.PLUGIN_KEEP
     
+    
+    def detach_actions(self):
+        for model_name, action_info in self.model_action_map.items():
+            action_name = action_info["action_name"]
+            menu_path = action_info["menu_path"]
+            
+            ida_kernwin.execute_sync(functools.partial(idaapi.unregister_action, action_name), ida_kernwin.MFF_FAST)
+            ida_kernwin.execute_sync(functools.partial(idaapi.detach_action_from_menu, menu_path, action_name), ida_kernwin.MFF_FAST)
+        
+        self.model_action_map.clear()
+    
     def generate_plugin_select_menu(self, default_model):
         global global_default_model
-    
         global_default_model = default_model
+
+        def do_generate_model_select_menu():
+            self.detach_actions()
+
+            MODEL_CONFIGS = create_model_config()
+            for model_config in MODEL_CONFIGS:
+                menu_path = "Binoculars/" + model_config.context_path
+                self.bind_model_switch_action(menu_path, model_config, default_model)
+
+        threading.Thread(target=do_generate_model_select_menu).start()
+
         
-        MODEL_CONFIGS = create_model_config()
-        for model_config in MODEL_CONFIGS:
-            idaapi.unregister_action(f"Binoculars:select_{model_config.model_class}_{model_config.name}")  
-            
-        for model_config in MODEL_CONFIGS:
-            self.bind_model_switch_action(model_config, default_model)
-    
-    def bind_model_switch_action(self, model_config, default_model):
+    def bind_model_switch_action(self, menu_path, model_config, default_model):
         from Binoculars.function.SwapModel import SwapModelHandler
-     
-        action_name = f"Binoculars:select_{model_config.model_class}_{model_config.name}"
-        action = idaapi.action_desc_t(action_name,
-                                      model_config.name,
-                                      None if str(default_model) == model_config.name
-                                      else SwapModelHandler(model_config.model_class, model_config.name, self),
-                                      "",
-                                      "",
-                                      208 if str(default_model) == model_config.name else 0)
-        idaapi.register_action(action)
+
+
+        unique_id = ''.join(random.choices(string.ascii_lowercase, k=7))
+        action_name = f"Binoculars:select_{model_config.model_class}_{model_config.name}_{unique_id}"
+
+        self.model_action_map[model_config.name] = {
+            "action_name": action_name,
+            "menu_path": menu_path
+        }
+
+        action = idaapi.action_desc_t(
+            action_name,
+            model_config.name,
+            SwapModelHandler(model_config.model_class, model_config.name, self),
+            "",
+            "",
+            208 if str(default_model) == model_config.name else 0
+        )
+
+        ida_kernwin.execute_sync(functools.partial(idaapi.register_action, action), ida_kernwin.MFF_FAST)
+        ida_kernwin.execute_sync(
+            functools.partial(idaapi.attach_action_to_menu, menu_path, action_name, idaapi.SETMENU_APP),
+            ida_kernwin.MFF_FAST
+        )
+
 
     def run(self, arg):
         self.assistant_window = AssistantWidget()
@@ -104,19 +151,21 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
         QtCore.QObject.__init__(self)
         self.icon = ida_kernwin.load_custom_icon("Binoculars/images/logo.ico")
         self.stop_flag = False
-        self.message_history_flag = False
+        self.message_history_flag = True
         self.default_model = global_default_model      
         self.current_language = get_current_language()
         self.error_count = 0
         self.error_retry = 3
     
+    def PrintOutput(self, output_str):
+        self.chat_record.append(f"<b>System Message:</b> {output_str}")
     
     def change_default_model(self):
         global global_default_model
         self.default_model = global_default_model
 
     def OnCreate(self, form):
-        from Binoculars.function.Handle import FuncHandle
+        # from Binoculars.function.Handle import FuncHandle
         self.parent = self.FormToPyQtWidget(form)
         self.PopulateForm()
         self.assistant = IDAAssistant()
@@ -293,9 +342,7 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
         self.chat_record.append(f"<b>System Message:</b> AI execution stopped.")
         
     def OnSendClicked(self):
-        
         self.change_default_model()
-    
         global message_history,query,system_prompt_flag
         self.stop_flag = False
 
@@ -312,16 +359,17 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
             messages = message_history.copy() 
             self.default_model.query_model_async(query, messages, systemprompt, self.OnResponseReceived)
             
-    
+    # 接受回复
     def OnResponseReceived(self, response):
         global message_history, query
-        from Binoculars.function.Handle import FuncHandle
         
         assistant_reply = response.strip().replace("```json\n", "").replace("```\n", "").strip()
         
         if self.message_history_flag:
             message_history.append({"role": "user", "content": query})
-            message_history.append({"role": "assistant", "content": assistant_reply})    
+            message_history.append({"role": "assistant", "content": assistant_reply})# 
+            if len(message_history) > 20:
+                message_history = message_history[2:]    
             
         chat_history.append(f"<b>User:</b> {query}")
     
@@ -336,19 +384,30 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
                 self.chat_record.append(f"<b>System Message:</b> No response from Binoculars.")
                 return
                 
-            self.chat_record.append(f"<b>\Binoculars:</b> {assistant_reply['thoughts']['speak']}")
+            parsed_data = assistant_reply["parsed"]
+            remaining_text = assistant_reply["remaining"]
 
-            commands = assistant_reply['command']
+            self.chat_record.append(f"<b>Binoculars:</b> {parsed_data['thoughts']['speak']}")
+            if remaining_text:
+                self.chat_record.append(f"<b>Binoculars:</b> {remaining_text}")
+            
+            
+            commands = parsed_data['command']
             command_results = {}
             for command in commands:
                 command_name = command['name']
                 if command_name == "do_nothing":
                     continue
-                command_args = command['args']
-                command_args["default_model"] = self.default_model
-                command_handler = getattr(self.func_handle, f"handle_{command_name}", None)
+                command_args = command['args'].copy()
+                command_args["default_model"] = self.default_model    
+                
+                command_handler = getattr(self.func_handle, f"{command_name}", None)
+                
                 if command_handler:
-                    command_handler_result = command_handler(command_args)
+                    sig = inspect.signature(command_handler)
+                    valid_params = list(sig.parameters.keys())
+                    filtered_args = {k: v for k, v in command_args.items() if k in valid_params}
+                    command_handler_result = command_handler(**filtered_args)
                     if isinstance(command_handler_result, dict) and "result" in command_handler_result:
                         self.PrintOutput(f"Module execution results: {command_handler_result['result']}")
         
@@ -374,7 +433,7 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
 
         except Exception as e:
             traceback_details = traceback.format_exc()
-            print(traceback_details)
+            print(traceback_details) # 打印了错误
             
             self.error_count += 1
             
@@ -387,54 +446,73 @@ class AssistantWidget(ida_kernwin.PluginForm, QtCore.QObject):
             else:
                 self.PrintOutput(f"Error parsing Binoculars response: {str(e)}")
                 
+
+            
     def ParseResponse(self, response):
-        print(response)
         try:
-            response = self.sanitize_json(response)
-            if response:
-                
-                parsed_response = json.loads(response)
-                return parsed_response
+            json_str, remaining_text = self.sanitize_json(response)
+            if json_str:
+                parsed_response = json.loads(json_str)
+                return {
+                    "parsed": parsed_response,
+                    "remaining": remaining_text.strip()
+                }
             else:
-                raise Exception("The data you returned is not in the required JSON format. Please return the information in the required JSON format.")
+                raise Exception("JSON format required.")
         except json.JSONDecodeError as e:
-            raise Exception(str(e) + "error occurred. suggestion: Return only the required data in JSON format. No additional explanations or information outside of the JSON format should be included.")
+            raise Exception(f"{str(e)}. Return ONLY valid JSON.")
         except Exception as e:
             raise e
 
-    
     def sanitize_json(self, mixed_content):
-        json_string = self.extract_json(mixed_content)
-        json_string = re.sub(r'\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})', '', json_string)
-        json_string = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', json_string)
-        json_string = re.sub(r'"\s*\n\s*"', '""', json_string)
-        json_string = re.sub(r'\s*\n\s*', '', json_string)
+        json_str, remaining = self.extract_json(mixed_content)
+
+        if not json_str:
+            return "", mixed_content
+
+        valid_escapes = ['\\n', '\\r', '\\t', '\\b', '\\f', '\\"', '\\\\', '\\/', '\\u']
         
-        return json_string   
+        placeholder_map = {}
+        def placeholder_replacer(match):
+            s = match.group(0)
+            placeholder = f"__ESCAPE_{len(placeholder_map)}__"
+            placeholder_map[placeholder] = s
+            return placeholder
+
+        temp_json = json_str
+        for valid in valid_escapes:
+            import re
+            temp_json = re.sub(re.escape(valid), placeholder_replacer, temp_json)
+
+        temp_json = re.sub(r'\\(?![\\"nrtbfu/])', r'\\\\', temp_json)  # 修复非法 \x → \\x
+
+        for placeholder, original in placeholder_map.items():
+            temp_json = temp_json.replace(placeholder, original)
+
+        temp_json = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', temp_json)  # 清理控制字符
+
+        temp_json = re.sub(r'"\s*\n\s*"', '""', temp_json)  # "内容"\n"更多" → "" 更安全
+        temp_json = re.sub(r'\s*\n\s*', ' ', temp_json)      # 换行 → 空格
+
+        return temp_json, remaining
+
 
     def extract_json(self, mixed_content):
-        json_str = ''
         stack = []
-        slash = False
-
+        json_start = -1
+        json_str = ""
+        remaining = mixed_content
+        
         for i, char in enumerate(mixed_content):
-            if slash:
-                slash = False
-                continue
-
             if char == '{':
+                if not stack:
+                    json_start = i
                 stack.append(i)
             elif char == '}':
-                if not stack:
-                    continue
-                start = stack.pop()
-                json_str = mixed_content[start:i + 1]
-            elif char == '\\':
-                slash = True
-
-        return json_str
-            
-    def PrintOutput(self, output_str):
-        self.chat_record.append(f"<b>System Message:</b> {output_str}")
-        
-        
+                if stack:
+                    start = stack.pop()
+                    if not stack:
+                        json_str = mixed_content[json_start:i+1]
+                        remaining = mixed_content[i+1:].lstrip()
+                        break
+        return json_str, remaining
